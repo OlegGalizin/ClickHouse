@@ -73,9 +73,9 @@ private:
         std::shared_ptr<WriteBuffer> out_maybe_compressed;
 
         /// If output should be delayed holds cascade buffer
-        std::unique_ptr<CascadeWriteBuffer> out_delayed_and_compressed_holder;
+        std::shared_ptr<CascadeWriteBuffer> out_delayed_and_compressed_holder;
         /// Points to out_maybe_compressed or to CascadeWriteBuffer.
-        WriteBuffer * out_maybe_delayed_and_compressed = nullptr;
+        std::shared_ptr<WriteBuffer>  out_maybe_delayed_and_compressed;
 
         bool finalized = false;
         bool canceled = false;
@@ -85,7 +85,7 @@ private:
 
         bool hasDelayed() const
         {
-            return out_maybe_delayed_and_compressed != out_maybe_compressed.get();
+            return out_maybe_delayed_and_compressed && out_maybe_delayed_and_compressed != out_maybe_compressed;
         }
 
         void finalize()

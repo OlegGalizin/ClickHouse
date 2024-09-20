@@ -150,7 +150,7 @@ static std::chrono::steady_clock::duration parseSessionTimeout(
 
 void HTTPHandler::pushDelayedResults(Output & used_output)
 {
-    auto * cascade_buffer = typeid_cast<CascadeWriteBuffer *>(used_output.out_maybe_delayed_and_compressed);
+    auto * cascade_buffer = typeid_cast<CascadeWriteBuffer *>(used_output.out_maybe_delayed_and_compressed.get());
     if (!cascade_buffer)
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Expected CascadeWriteBuffer");
 
@@ -286,7 +286,7 @@ void HTTPHandler::processQuery(
             request.getMethod() == HTTPRequest::HTTP_HEAD,
             write_event);
     used_output.out = used_output.out_holder;
-    used_output.out_maybe_compressed = used_output.out_holder;
+    used_output.out_maybe_compressed = used_output.out;
 
     if (client_supports_http_compression && enable_http_compression)
     {
@@ -301,6 +301,7 @@ void HTTPHandler::processQuery(
             0,
             false);
         used_output.out = used_output.wrap_compressed_holder;
+        used_output.out_maybe_compressed = used_output.out;
     }
 
     if (internal_compression)
@@ -308,8 +309,6 @@ void HTTPHandler::processQuery(
         used_output.out_compressed_holder = std::make_shared<CompressedWriteBuffer>(*used_output.out);
         used_output.out_maybe_compressed = used_output.out_compressed_holder;
     }
-    else
-        used_output.out_maybe_compressed = used_output.out;
 
     if (buffer_size_memory > 0 || buffer_until_eof)
     {
@@ -323,7 +322,8 @@ void HTTPHandler::processQuery(
         {
             auto tmp_data = std::make_shared<TemporaryDataOnDisk>(server.context()->getTempDataOnDisk());
 
-            auto create_tmp_disk_buffer = [tmp_data] (const WriteBufferPtr &) -> WriteBufferPtr {
+            auto create_tmp_disk_buffer = [tmp_data] (const WriteBufferPtr &) -> WriteBufferPtr
+            {
                 return tmp_data->createRawStream();
             };
 
@@ -343,15 +343,15 @@ void HTTPHandler::processQuery(
                 return next_buffer;
             };
 
-            cascade_buffer2.emplace_back(push_memory_buffer_and_continue);
+            cascade_buffer2.emplace_back(std::move(push_memory_buffer_and_continue));
         }
 
         used_output.out_delayed_and_compressed_holder = std::make_unique<CascadeWriteBuffer>(std::move(cascade_buffer1), std::move(cascade_buffer2));
-        used_output.out_maybe_delayed_and_compressed = used_output.out_delayed_and_compressed_holder.get();
+        used_output.out_maybe_delayed_and_compressed = used_output.out_delayed_and_compressed_holder;
     }
     else
     {
-        used_output.out_maybe_delayed_and_compressed = used_output.out_maybe_compressed.get();
+        used_output.out_maybe_delayed_and_compressed = used_output.out_maybe_compressed;
     }
 
     /// Request body can be compressed using algorithm specified in the Content-Encoding header.
@@ -611,8 +611,9 @@ try
         for (auto & wb : write_buffers)
             if (wb.unique())
                 wb->cancel();
+
+        used_output.out_maybe_delayed_and_compressed = used_output.out_maybe_compressed;
         used_output.out_delayed_and_compressed_holder.reset();
-        used_output.out_maybe_delayed_and_compressed = nullptr;
     }
 
     if (used_output.exception_is_written)

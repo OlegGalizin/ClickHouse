@@ -269,7 +269,18 @@ void WriteBufferFromHTTPServerResponse::cancelWithException(HTTPServerRequest & 
         if (compression_buffer && compression_buffer->isCanceled())
             compression_buffer = nullptr;
 
-        // proper senging
+        bool data_sent = false;
+        if  (compression_buffer)
+        {
+            data_sent |= (compression_buffer->count() != compression_buffer->offset());
+            if (!data_sent)
+                compression_buffer->position() = compression_buffer->buffer().begin();
+        }
+        data_sent |= (count() != offset());
+        if (!data_sent)
+            position() = buffer().begin();
+
+        // proper senging bad http code
         if (!response.sent())
         {
             LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "proper senging, {}", ErrorCodes::getName(exception_code_));

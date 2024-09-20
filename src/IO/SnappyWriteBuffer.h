@@ -24,8 +24,6 @@ public:
         char * existing_memory = nullptr,
         size_t alignment = 0);
 
-    ~SnappyWriteBuffer() override;
-
     void finalizeImpl() override { finish(); }
 
 private:
@@ -37,8 +35,6 @@ private:
     WriteBuffer * out;
     std::unique_ptr<WriteBuffer> out_holder;
 
-    bool finished = false;
-
     String uncompress_buffer;
     String compress_buffer;
 };
@@ -46,4 +42,3 @@ private:
 }
 
 #endif
-

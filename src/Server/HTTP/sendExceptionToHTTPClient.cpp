@@ -20,33 +20,6 @@ namespace ErrorCodes
     extern const int REQUIRED_PASSWORD;
 }
 
-void trySendExceptionToHTTPClient_A(
-    const String & exception_message,
-    int exception_code,
-    HTTPServerRequest & request,
-    HTTPServerResponse & response,
-    WriteBufferFromHTTPServerResponse * maybe_out) noexcept
-{
-    LOG_DEBUG(getLogger("sendExceptionToHTTPClient_A"), "begin has out {}", bool(maybe_out));
-
-    if (maybe_out)
-    {
-        /// If buffer has data, and that data wasn't sent yet, then no need to send that data
-        bool data_sent = (maybe_out->count() != maybe_out->offset());
-
-        if (!data_sent)
-            maybe_out->position() = maybe_out->buffer().begin();
-
-        maybe_out->cancelWithException(request, exception_code, exception_message, nullptr);
-        return;
-    }
-
-    /// If nothing was sent yet.
-    WriteBufferFromHTTPServerResponse out_for_message{response, request.getMethod() == HTTPRequest::HTTP_HEAD};
-    out_for_message.cancelWithException(request, exception_code, exception_message, nullptr);
-}
-
-
 void setHTTPResponseStatusAndHeadersForException_A(
     int exception_code, HTTPServerRequest & request, HTTPServerResponse & response, WriteBufferFromHTTPServerResponse * out)
 {

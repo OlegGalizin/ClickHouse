@@ -26,10 +26,10 @@ SnappyWriteBuffer::SnappyWriteBuffer(WriteBuffer & out_, size_t buf_size, char *
 {
 }
 
-SnappyWriteBuffer::~SnappyWriteBuffer()
-{
-    finish();
-}
+// SnappyWriteBuffer::~SnappyWriteBuffer()
+// {
+//     finish();
+// }
 
 void SnappyWriteBuffer::nextImpl()
 {
@@ -45,20 +45,14 @@ void SnappyWriteBuffer::nextImpl()
 
 void SnappyWriteBuffer::finish()
 {
-    if (finished)
-        return;
-
     try
     {
         finishImpl();
         out->finalize();
-        finished = true;
     }
     catch (...)
     {
-        /// Do not try to flush next time after exception.
-        out->position() = out->buffer().begin();
-        finished = true;
+        out->cancel();
         throw;
     }
 }
@@ -95,4 +89,3 @@ void SnappyWriteBuffer::finishImpl()
 }
 
 #endif
-

@@ -344,7 +344,6 @@ void PrometheusRequestHandler::handleRequest(HTTPServerRequest & request, HTTPSe
 
     try
     {
-        response_finalized = false;
         write_event = write_event_;
         http_method = request.getMethod();
         chassert(!write_buffer_from_response); /// Nothing is written to the response yet.
@@ -358,15 +357,14 @@ void PrometheusRequestHandler::handleRequest(HTTPServerRequest & request, HTTPSe
         impl->beforeHandlingRequest(request);
         impl->handleRequest(request, response);
 
-        finalizeResponse(response);
+        getOutputStream(response).finalize();
     }
     catch (...)
     {
         tryLogCurrentException(log);
 
-
         ExecutionStatus status = ExecutionStatus::fromCurrentException("", send_stacktrace);
-        trySendExceptionToHTTPClient_A(status.message, status.code, request, response, write_buffer_from_response.get());
+        getOutputStream(response).cancelWithException(request, status.code, status.message, nullptr);
 
         tryCallOnException();
     }
@@ -374,40 +372,13 @@ void PrometheusRequestHandler::handleRequest(HTTPServerRequest & request, HTTPSe
 
 WriteBufferFromHTTPServerResponse & PrometheusRequestHandler::getOutputStream(HTTPServerResponse & response)
 {
-    if (response_finalized)
-        throw Exception(ErrorCodes::LOGICAL_ERROR, "PrometheusRequestHandler: Response already sent");
     if (write_buffer_from_response)
         return *write_buffer_from_response;
+
     write_buffer_from_response = std::make_unique<WriteBufferFromHTTPServerResponse>(
         response, http_method == HTTPRequest::HTTP_HEAD, write_event);
+
     return *write_buffer_from_response;
-}
-
-void PrometheusRequestHandler::finalizeResponse(HTTPServerResponse & response)
-{
-    if (response_finalized)
-    {
-        /// Response is already finalized or at least tried to. We don't need the write buffer anymore in either case.
-        write_buffer_from_response = nullptr;
-    }
-    else
-    {
-        /// We set `response_finalized = true` before actually calling `write_buffer_from_response->finalize()`
-        /// because we shouldn't call finalize() again even if finalize() throws an exception.
-        response_finalized = true;
-
-        if (write_buffer_from_response)
-        {
-            auto tmp = std::move(write_buffer_from_response);
-            tmp->finalize();
-        }
-        else
-        {
-            auto wb = WriteBufferFromHTTPServerResponse(response, http_method == HTTPRequest::HTTP_HEAD, write_event);
-            wb.finalize();
-        }
-    }
-    chassert(response_finalized && !write_buffer_from_response);
 }
 
 void PrometheusRequestHandler::tryCallOnException()

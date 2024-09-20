@@ -1,3 +1,4 @@
+#include <memory>
 #include <IO/CascadeWriteBuffer.h>
 #include <IO/MemoryReadWriteBuffer.h>
 #include <Common/Exception.h>
@@ -111,7 +112,7 @@ WriteBuffer * CascadeWriteBuffer::setNextBuffer()
     {
         if (!prepared_sources[curr_buffer_num])
         {
-            WriteBufferPtr prev_buf = (curr_buffer_num > 0) ? prepared_sources[curr_buffer_num - 1] : nullptr;
+            auto prev_buf = (curr_buffer_num > 0) ? prepared_sources[curr_buffer_num - 1] : nullptr;
             prepared_sources[curr_buffer_num] = lazy_sources[curr_buffer_num - first_lazy_source_num](prev_buf);
         }
     }

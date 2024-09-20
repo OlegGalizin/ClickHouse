@@ -1,6 +1,8 @@
 #pragma once
 #include <functional>
+#include <memory>
 #include <IO/WriteBuffer.h>
+#include "IO/WriteBufferFromS3.h"
 
 
 namespace DB
@@ -27,9 +29,9 @@ class CascadeWriteBuffer : public WriteBuffer
 {
 public:
 
-    using WriteBufferPtrs = std::vector<WriteBufferPtr>;
     using WriteBufferConstructor = std::function<WriteBufferPtr (const WriteBufferPtr & prev_buf)>;
     using WriteBufferConstructors = std::vector<WriteBufferConstructor>;
+    using WriteBufferPtrs = std::vector<WriteBufferPtr>;
 
     explicit CascadeWriteBuffer(WriteBufferPtrs && prepared_sources_, WriteBufferConstructors && lazy_sources_ = {});
 
@@ -37,8 +39,6 @@ public:
 
     /// Should be called once
     WriteBufferPtrs getResultBuffers();
-
-    void releaseInnerBuffers();
 
     const WriteBuffer * getCurrentBuffer() const
     {
