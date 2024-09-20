@@ -99,7 +99,7 @@ void signalHandler(int sig, siginfo_t * info, void * context)
     writeBinary(static_cast<UInt32>(getThreadId()), out);
     writePODBinary(current_thread, out);
 
-    out.next();
+    out.finalize();
 
     if (sig != SIGTSTP) /// This signal is used for debugging.
     {
