@@ -600,7 +600,7 @@ void FileSegment::setDownloadFailedUnlocked(const FileSegmentGuard::Lock & lock)
 
     if (cache_writer)
     {
-        cache_writer->finalize();
+        cache_writer->cancel();
         cache_writer.reset();
     }
 
@@ -942,7 +942,7 @@ void FileSegment::setDetachedState(const FileSegmentGuard::Lock & lock)
     queue_iterator = nullptr;
     if (cache_writer)
         cache_writer->cancel();
-    cache_writer = nullptr;
+    cache_writer.reset();
 }
 
 void FileSegment::detach(const FileSegmentGuard::Lock & lock, const LockedKey &)
