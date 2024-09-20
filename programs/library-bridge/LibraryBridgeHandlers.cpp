@@ -581,21 +581,13 @@ void CatBoostLibraryBridgeRequestHandler::handleRequest(HTTPServerRequest & requ
             processError(response, "Unknown library method '" + method + "'");
             LOG_ERROR(log, "Unknown library method: '{}'", method);
         }
+
+        out.finalize();
     }
     catch (...)
     {
         tryLogCurrentException(log, "Failed to process request");
         out.cancelWithException(request, getCurrentExceptionCode(), getCurrentExceptionMessage(true), nullptr);
-        return;
-    }
-
-    try
-    {
-        out.finalize();
-    }
-    catch (...)
-    {
-        tryLogCurrentException(log, "Failed to finalize response write buffer");
     }
 }
 

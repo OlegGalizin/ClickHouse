@@ -302,11 +302,10 @@ void WriteBufferFromHTTPServerResponse::cancelWithException(HTTPServerRequest & 
             writeChar('\n', out);
 
             LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "do finalize");
-            finalize();
 
-            // we do not need it
             if (compression_buffer)
-                compression_buffer->cancel();
+                compression_buffer->finalize();
+            finalize();
         }
         else
         {
@@ -352,6 +351,8 @@ void WriteBufferFromHTTPServerResponse::cancelWithException(HTTPServerRequest & 
                 compression_buffer->next();
             next();
 
+            if (compression_buffer)
+                compression_buffer->cancel();
             cancel();
         }
     }
@@ -359,10 +360,8 @@ void WriteBufferFromHTTPServerResponse::cancelWithException(HTTPServerRequest & 
     {
         tryLogCurrentException(__PRETTY_FUNCTION__, "Failed to send exception to response write buffer");
 
-        // we do not need it
         if (compression_buffer)
             compression_buffer->cancel();
-
         cancel();
     }
 }
