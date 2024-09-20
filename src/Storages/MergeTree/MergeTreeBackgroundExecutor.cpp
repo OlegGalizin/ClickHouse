@@ -187,16 +187,7 @@ void MergeTreeBackgroundExecutor<Queue>::removeTasksCorrespondingToStorage(Stora
         std::lock_guard lock(mutex);
 
         /// Erase storage related tasks from pending and select active tasks to wait for
-        try
-        {
-            /// An exception context is needed to proper delete write buffers without finalization
-            /// See WriteBuffer::~WriteBuffer for more context
-            throw std::runtime_error("Storage is about to be deleted. Done pending task as if it was aborted.");
-        }
-        catch (...)
-        {
-            pending.remove(id);
-        }
+        pending.cancelAndRemove(id);
 
         /// Copy items to wait for their completion
         std::copy_if(active.begin(), active.end(), std::back_inserter(tasks_to_wait),
