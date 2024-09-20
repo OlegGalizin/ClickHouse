@@ -165,9 +165,6 @@ def test_upload_s3_fail_create_multi_part_upload(cluster, broken_s3, compression
     )
     assert create_multipart == 1
     assert upload_parts == 0
-    # the first error is the injected error
-    # the second is `void DB::WriteBufferFromS3::tryToAbortMultipartUpload(): Code: 499. DB::Exception: The specified multipart upload does not exist.`
-    # due to `broken_s3.setup_fake_multpartuploads()`
     assert s3_errors == 1
 
 
