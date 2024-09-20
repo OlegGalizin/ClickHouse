@@ -33,7 +33,6 @@ namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
     extern const int SUPPORT_IS_DISABLED;
-    extern const int LOGICAL_ERROR;
 }
 
 /// Base implementation of a prometheus protocol.

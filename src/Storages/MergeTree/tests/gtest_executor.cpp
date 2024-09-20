@@ -39,7 +39,7 @@ public:
         return false;
     }
 
-    void cancel() noexcept override { chassert(false, "Not implemented"); }
+    void cancel() noexcept override { /* no op */ }
 
     StorageID getStorageID() const override
     {

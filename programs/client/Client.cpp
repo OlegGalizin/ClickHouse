@@ -795,14 +795,12 @@ bool Client::processWithFuzzing(const String & full_query)
         {
             WriteBufferFromOwnString dump_before_fuzz;
             fuzz_base->dumpTree(dump_before_fuzz);
-            dump_before_fuzz.finalize();
             auto base_before_fuzz = fuzz_base->formatForErrorMessage();
 
             ast_to_process = fuzz_base->clone();
 
             WriteBufferFromOwnString dump_of_cloned_ast;
             ast_to_process->dumpTree(dump_of_cloned_ast);
-            dump_of_cloned_ast.finalize();
 
             // Run the original query as well.
             if (fuzz_step > 0)
