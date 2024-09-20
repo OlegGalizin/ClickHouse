@@ -114,29 +114,31 @@ WriteBufferFromFileDescriptor::WriteBufferFromFileDescriptor(
 }
 
 
-WriteBufferFromFileDescriptor::~WriteBufferFromFileDescriptor()
-{
-    try
-    {
-        if (!canceled)
-            finalize();
-    }
-    catch (...)
-    {
-        tryLogCurrentException(__PRETTY_FUNCTION__);
-    }
-}
+// WriteBufferFromFileDescriptor::~WriteBufferFromFileDescriptor()
+// {
+//     try
+//     {
+//         if (!canceled)
+//             finalize();
+//     }
+//     catch (...)
+//     {
+//         tryLogCurrentException(__PRETTY_FUNCTION__);
+//     }
+// }
 
 void WriteBufferFromFileDescriptor::finalizeImpl()
 {
     if (fd < 0)
     {
-        assert(!offset() && "attempt to write after close");
+        chassert(!offset(), "attempt to write after close");
         return;
     }
 
     use_adaptive_buffer_size = false;
     next();
+
+    WriteBufferFromFileBase::finalizeImpl();
 }
 
 void WriteBufferFromFileDescriptor::sync()

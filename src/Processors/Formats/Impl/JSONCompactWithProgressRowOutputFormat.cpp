@@ -82,11 +82,13 @@ void JSONCompactWithProgressRowOutputFormat::onProgress(const Progress & value)
 {
     statistics.progress.incrementPiecewiseAtomically(value);
     String progress_line;
-    WriteBufferFromString buf(progress_line);
-    writeCString("{\"progress\":", buf);
-    statistics.progress.writeJSON(buf);
-    writeCString("}\n", buf);
-    buf.finalize();
+    {
+        WriteBufferFromString buf(progress_line);
+        writeCString("{\"progress\":", buf);
+        statistics.progress.writeJSON(buf);
+        writeCString("}\n", buf);
+    }
+
     std::lock_guard lock(progress_lines_mutex);
     progress_lines.emplace_back(std::move(progress_line));
     has_progress = true;
@@ -117,7 +119,7 @@ void JSONCompactWithProgressRowOutputFormat::writeProgress()
 
 void JSONCompactWithProgressRowOutputFormat::finalizeImpl()
 {
-    if (exception_message.empty())
+    if (exception_message_A.empty())
     {
         JSONUtils::writeCompactAdditionalInfo(
             row_count,
@@ -131,7 +133,7 @@ void JSONCompactWithProgressRowOutputFormat::finalizeImpl()
     else
     {
         JSONUtils::writeCompactObjectStart(*ostr);
-        JSONUtils::writeException(exception_message, *ostr, settings, 0);
+        JSONUtils::writeException(exception_message_A, *ostr, settings, 0);
         JSONUtils::writeCompactObjectEnd(*ostr);
     }
     writeCString("\n", *ostr);

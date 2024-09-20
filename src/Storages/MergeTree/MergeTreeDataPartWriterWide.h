@@ -19,6 +19,8 @@ using ColumnNameToMark = std::unordered_map<String, StreamsWithMarks>;
 /// Writes data part in wide format.
 class MergeTreeDataPartWriterWide : public MergeTreeDataPartWriterOnDisk
 {
+    using Base = MergeTreeDataPartWriterOnDisk;
+
 public:
     MergeTreeDataPartWriterWide(
         const String & data_part_name_,
@@ -37,11 +39,14 @@ public:
         const MergeTreeWriterSettings & settings,
         const MergeTreeIndexGranularity & index_granularity);
 
+    ~MergeTreeDataPartWriterWide() override;
+
     void write(const Block & block, const IColumn::Permutation * permutation) override;
 
     void fillChecksums(MergeTreeDataPartChecksums & checksums, NameSet & checksums_to_remove) final;
 
     void finish(bool sync) final;
+    void cancel() noexcept override;
 
 private:
     /// Finish serialization of data: write final mark if required and compute checksums

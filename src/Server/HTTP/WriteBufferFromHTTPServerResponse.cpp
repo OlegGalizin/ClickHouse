@@ -1,18 +1,39 @@
 #include <Server/HTTP/WriteBufferFromHTTPServerResponse.h>
+#include <Server/HTTP/exceptionCodeToHTTPStatus.h>
 #include <IO/HTTPCommon.h>
 #include <IO/Progress.h>
 #include <IO/WriteBufferFromString.h>
 #include <IO/WriteHelpers.h>
+#include <fmt/core.h>
+#include <Poco/Net/HTTPResponse.h>
+#include <Common/ErrorCodes.h>
+#include "Common/Exception.h"
+#include "Common/StackTrace.h"
+#include "Common/logger_useful.h"
+#include "DataTypes/IDataType.h"
+#include "IO/WriteIntText.h"
+#include "Server/HTTP/sendExceptionToHTTPClient.h"
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace DB
 {
 
+namespace ErrorCodes
+{
+    extern const int CANNOT_WRITE_AFTER_END_OF_BUFFER;
+    extern const int REQUIRED_PASSWORD;
+    extern const int ABORTED;
+}
+
 
 void WriteBufferFromHTTPServerResponse::startSendHeaders()
 {
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "startSendHeaders");
+
     if (!headers_started_sending)
     {
         headers_started_sending = true;
@@ -39,12 +60,14 @@ void WriteBufferFromHTTPServerResponse::startSendHeaders()
 
 void WriteBufferFromHTTPServerResponse::writeHeaderProgressImpl(const char * header_name)
 {
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "writeHeaderProgressImpl");
+
     if (is_http_method_head || headers_finished_sending || !headers_started_sending)
         return;
 
     WriteBufferFromOwnString progress_string_writer;
-
     accumulated_progress.writeJSON(progress_string_writer);
+    progress_string_writer.finalize();
 
     socketSendBytes(header_name, strlen(header_name));
     socketSendBytes(progress_string_writer.str().data(), progress_string_writer.str().size());
@@ -64,11 +87,15 @@ void WriteBufferFromHTTPServerResponse::writeHeaderProgress()
 
 void WriteBufferFromHTTPServerResponse::writeExceptionCode()
 {
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "writeExceptionCode");
+
     if (headers_finished_sending || !exception_code)
         return;
+
     if (headers_started_sending)
     {
-        socketSendBytes("X-ClickHouse-Exception-Code: ", sizeof("X-ClickHouse-Exception-Code: ") - 1);
+        static std::string_view header_key = "X-ClickHouse-Exception-Code: ";
+        socketSendBytes(header_key.data(), header_key.size());
         auto str_code = std::to_string(exception_code);
         socketSendBytes(str_code.data(), str_code.size());
         socketSendBytes("\r\n", 2);
@@ -77,6 +104,8 @@ void WriteBufferFromHTTPServerResponse::writeExceptionCode()
 
 void WriteBufferFromHTTPServerResponse::finishSendHeaders()
 {
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "finishSendHeaders");
+
     if (headers_finished_sending)
         return;
 
@@ -99,6 +128,8 @@ void WriteBufferFromHTTPServerResponse::finishSendHeaders()
 
 void WriteBufferFromHTTPServerResponse::nextImpl()
 {
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "nextImpl");
+
     if (!initialized)
     {
         std::lock_guard lock(mutex);
@@ -157,7 +188,7 @@ void WriteBufferFromHTTPServerResponse::onProgress(const Progress & progress)
     }
 }
 
-void WriteBufferFromHTTPServerResponse::setExceptionCode(int exception_code_)
+void WriteBufferFromHTTPServerResponse::setExceptionCode_A(int exception_code_)
 {
     std::lock_guard lock(mutex);
     if (headers_started_sending)
@@ -166,21 +197,23 @@ void WriteBufferFromHTTPServerResponse::setExceptionCode(int exception_code_)
         response.set("X-ClickHouse-Exception-Code", toString<int>(exception_code_));
 }
 
-WriteBufferFromHTTPServerResponse::~WriteBufferFromHTTPServerResponse()
-{
-    try
-    {
-        if (!canceled)
-            finalize();
-    }
-    catch (...)
-    {
-        tryLogCurrentException(__PRETTY_FUNCTION__);
-    }
-}
+// WriteBufferFromHTTPServerResponse::~WriteBufferFromHTTPServerResponse()
+// {
+//     try
+//     {
+//         if (!canceled)
+//             finalize();
+//     }
+//     catch (...)
+//     {
+//         tryLogCurrentException(__PRETTY_FUNCTION__);
+//     }
+// }
 
 void WriteBufferFromHTTPServerResponse::finalizeImpl()
 {
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "finalizeImpl is_http_method_head {}", is_http_method_head);
+
     if (!headers_finished_sending)
     {
         std::lock_guard lock(mutex);
@@ -198,8 +231,129 @@ void WriteBufferFromHTTPServerResponse::finalizeImpl()
     }
 
     if (!is_http_method_head)
+    {
         HTTPWriteBuffer::finalizeImpl();
+    }
 }
 
+void WriteBufferFromHTTPServerResponse::cancelImpl() noexcept
+{
+    LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "cancel Stack: {}", StackTrace().toString());
+    // we have to close connection when it has been canceled
+    // client is waiting final empty chunk in the chunk encoding, chient has to receive EOF instead it ASAP
+    response.setKeepAlive(false);
+    HTTPWriteBuffer::cancelImpl();
+}
+
+bool WriteBufferFromHTTPServerResponse::isChunked() const
+{
+    chassert(response.sent());
+    return HTTPWriteBuffer::isChunked();
+}
+
+bool WriteBufferFromHTTPServerResponse::isFixedLength() const
+{
+    chassert(response.sent());
+    return HTTPWriteBuffer::isFixedLength();
+}
+
+void WriteBufferFromHTTPServerResponse::cancelWithException(HTTPServerRequest & request, int exception_code_, const std::string & message, WriteBuffer * compression_buffer) noexcept
+{
+    try
+    {
+        LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "cancelWithException isCanceled: {}", isCanceled());
+        if (isCanceled())
+            throw Exception(ErrorCodes::ABORTED, "Write buffer has been canceled.");
+
+        LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "cancelWithException has compression_buffer: {} is canceled: {}", bool(compression_buffer), bool(compression_buffer && compression_buffer->isCanceled()));
+        if (compression_buffer && compression_buffer->isCanceled())
+            compression_buffer = nullptr;
+
+        // proper senging
+        if (!response.sent())
+        {
+            LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "proper senging, {}", ErrorCodes::getName(exception_code_));
+
+            drainRequstIfNeded(request, response);
+            // We try to send the exception message when the transmission has not been started yet
+            // Set HTTP code and HTTP message. Add "X-ClickHouse-Exception-Code" header.
+            // If it is not HEAD request send the message in the body.
+            if (exception_code_ == ErrorCodes::REQUIRED_PASSWORD)
+                response.requireAuthentication("ClickHouse server HTTP API");
+            else
+                response.setStatusAndReason(exceptionCodeToHTTPStatus(exception_code_));
+
+            setExceptionCode_A(exception_code_);
+
+            LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "write error {}:<{}>", message.size(), message);
+            auto & out = compression_buffer ? *compression_buffer : *this;
+            writeString(message, out);
+            writeChar('\n', out);
+
+            LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "do finalize");
+            finalize();
+
+            // we do not need it
+            if (compression_buffer)
+                compression_buffer->cancel();
+        }
+        else
+        {
+            LOG_DEBUG(getLogger("WriteBufferFromHTTPServerResponse"), "hard case");
+
+            // We try to send the exception message even when the transmission has been started already
+            // In case the chunk encoding: send new chunk which started with CHUNK_ENCODING_ERROR_HEADER and contains the error description
+            // it is important to avoid sending the last empty chunk in order to break the http protocol here.
+            // In case of fixed lengs we could send error but less that fixedLengthLeft bytes.
+            // In case of plain stream all ways are questionable, but lets send the error any way.
+
+            // no point to drain request, transmission has been already started hence the request has been read
+            // but make sense to try to send proper `connnection: close` header if headers are not finished yet
+            response.setKeepAlive(false);
+
+            // try to send proper header in case headers are not finished yet
+            setExceptionCode_A(exception_code_);
+
+            auto data = fmt::format("{}\r\n{}\n",
+                EXCEPTION_MARKER,
+                message);
+
+            if (compression_buffer)
+                compression_buffer->next();
+            next();
+
+            if (isFixedLength())
+            {
+                if (fixedLengthLeft() > EXCEPTION_MARKER.size())
+                    /// fixed length buffer drops all excess data
+                    /// make sure that we send less than content-lenght bytes at the end
+                    breakFixedLength();
+                else
+                    throw Exception(ErrorCodes::CANNOT_WRITE_AFTER_END_OF_BUFFER, "There is no space left in the fixed length HTTP-write buffer to write the exception header.");
+            }
+
+            auto & out = compression_buffer ? *compression_buffer : *this;
+            writeString(EXCEPTION_MARKER, out);
+            writeCString("\r\n", out);
+            writeString(message, out);
+
+            if (compression_buffer)
+                compression_buffer->next();
+            next();
+
+            cancel();
+        }
+    }
+    catch (...)
+    {
+        tryLogCurrentException(__PRETTY_FUNCTION__, "Failed to send exception to response write buffer");
+
+        // we do not need it
+        if (compression_buffer)
+            compression_buffer->cancel();
+
+        cancel();
+    }
+}
 
 }

@@ -9,9 +9,11 @@
 #include <Poco/Net/StreamSocket.h>
 #include <Common/NetException.h>
 #include <Common/Stopwatch.h>
+#include "base/defines.h"
 
 #include <mutex>
 #include <optional>
+#include <string_view>
 
 
 namespace DB
@@ -26,12 +28,14 @@ namespace DB
 class WriteBufferFromHTTPServerResponse final : public HTTPWriteBuffer
 {
 public:
+    static constexpr std::string_view EXCEPTION_MARKER = "__exception__";
+
     WriteBufferFromHTTPServerResponse(
         HTTPServerResponse & response_,
         bool is_http_method_head_,
         const ProfileEvents::Event & write_event_ = ProfileEvents::end());
 
-    ~WriteBufferFromHTTPServerResponse() override;
+    // ~WriteBufferFromHTTPServerResponse() override;
 
     /// Writes progress in repeating HTTP headers.
     void onProgress(const Progress & progress);
@@ -58,7 +62,13 @@ public:
         compression_method = compression_method_;
     }
 
-    void setExceptionCode(int exception_code_);
+    bool isChunked() const;
+
+    bool isFixedLength() const;
+
+    void setExceptionCode_A(int exception_code_);
+
+    void cancelWithException(HTTPServerRequest & request, int exception_code_, const std::string & message, WriteBuffer * compression_buffer) noexcept;
 
 private:
     /// Send at least HTTP headers if no data has been sent yet.
@@ -66,6 +76,8 @@ private:
     /// to change response HTTP code.
     /// This method is idempotent.
     void finalizeImpl() override;
+
+    void cancelImpl() noexcept override;
 
     /// Must be called under locked mutex.
     /// This method send headers, if this was not done already,

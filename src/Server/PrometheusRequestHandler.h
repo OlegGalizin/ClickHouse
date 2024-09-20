@@ -33,10 +33,6 @@ private:
 
     /// Finalizes the output stream and sends the response to the client.
     void finalizeResponse(HTTPServerResponse & response);
-    void tryFinalizeResponse(HTTPServerResponse & response);
-
-    /// Writes the current exception to the response.
-    void trySendExceptionToClient(const String & exception_message, int exception_code, HTTPServerRequest & request, HTTPServerResponse & response);
 
     /// Calls onException() in a try-catch block.
     void tryCallOnException();

@@ -197,21 +197,9 @@ void ODBCHandler::handleRequest(HTTPServerRequest & request, HTTPServerResponse 
     }
     catch (...)
     {
-        auto message = getCurrentExceptionMessage(true);
-        response.setStatusAndReason(
-                Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR); // can't call process_error, because of too soon response sending
-
-        try
-        {
-            writeStringBinary(message, out);
-            out.finalize();
-        }
-        catch (...)
-        {
-            tryLogCurrentException(log);
-        }
-
         tryLogCurrentException(log);
+        out.cancelWithException(request, getCurrentExceptionCode(), getCurrentExceptionMessage(true), nullptr);
+        return;
     }
 
     try
@@ -220,7 +208,7 @@ void ODBCHandler::handleRequest(HTTPServerRequest & request, HTTPServerResponse 
     }
     catch (...)
     {
-        tryLogCurrentException(log);
+        tryLogCurrentException(log, "Failed to finalize response write buffer");
     }
 }
 

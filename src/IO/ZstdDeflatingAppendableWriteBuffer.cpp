@@ -88,33 +88,27 @@ void ZstdDeflatingAppendableWriteBuffer::nextImpl()
 
 }
 
-ZstdDeflatingAppendableWriteBuffer::~ZstdDeflatingAppendableWriteBuffer()
-{
-    finalize();
-}
-
 void ZstdDeflatingAppendableWriteBuffer::finalizeImpl()
 {
-    if (first_write)
+    try
     {
-        /// To free cctx
-        finalizeZstd();
-        /// Nothing was written
-    }
-    else
-    {
-        try
+        if (first_write)
+        {
+            /// To free cctx
+            finalizeZstd();
+            /// Nothing was written
+        }
+        else
         {
             finalizeBefore();
             out->finalize();
             finalizeAfter();
         }
-        catch (...)
-        {
-            /// Do not try to flush next time after exception.
-            out->position() = out->buffer().begin();
-            throw;
-        }
+    }
+    catch (...)
+    {
+        out->cancel();
+        throw;
     }
 }
 

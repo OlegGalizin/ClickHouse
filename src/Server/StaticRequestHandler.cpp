@@ -3,6 +3,7 @@
 
 #include "HTTPHandlerFactory.h"
 #include "HTTPResponseHeaderWriter.h"
+#include "Server/HTTP/sendExceptionToHTTPClient.h"
 
 #include <Core/ServerSettings.h>
 #include <IO/HTTPCommon.h>
@@ -58,19 +59,17 @@ static inline void trySendExceptionToClient(
 {
     try
     {
+        drainRequstIfNeded(request, response);
+
         response.set("X-ClickHouse-Exception-Code", toString<int>(exception_code));
-
-        /// If HTTP method is POST and Keep-Alive is turned on, we should read the whole request body
-        /// to avoid reading part of the current request body in the next request.
-        if (request.getMethod() == Poco::Net::HTTPRequest::HTTP_POST
-            && response.getKeepAlive() && !request.getStream().eof() && exception_code != ErrorCodes::HTTP_LENGTH_REQUIRED)
-            request.getStream().ignore(std::numeric_limits<std::streamsize>::max());
-
         response.setStatusAndReason(Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
 
         if (!response.sent())
+        {
             *response.send() << s << '\n';
-        else
+            out.finalize();
+        }
+        else if (!out.isCanceled())
         {
             if (out.count() != out.offset())
                 out.position() = out.buffer().begin();

@@ -113,6 +113,10 @@ void IOutputFormat::flush()
 
 void IOutputFormat::write(const Block & block)
 {
+    LOG_TEST(
+        getLogger("IOutputFormat"),
+        "write buffer finalized {}", getWriteBufferPtr()->isFinalized());
+
     writePrefixIfNeeded();
     consume(Chunk(block.getColumns(), block.rows()));
 
@@ -124,6 +128,11 @@ void IOutputFormat::finalize()
 {
     if (finalized)
         return;
+
+    LOG_TEST(
+        getLogger("IOutputFormat"),
+        "finalize buffer finalized {}", getWriteBufferPtr()->isFinalized());
+
     writePrefixIfNeeded();
     writeSuffixIfNeeded();
     finalizeImpl();

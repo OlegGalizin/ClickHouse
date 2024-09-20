@@ -549,6 +549,7 @@ QueryPipeline InterpreterExplainQuery::executeImpl()
                     /* async_isnert */ false);
                 auto io = insert.execute();
                 printPipeline(io.pipeline.getProcessors(), buf);
+                io.pipeline.cancel();
             }
             else
                 throw Exception(ErrorCodes::INCORRECT_QUERY, "Only SELECT and INSERT is supported for EXPLAIN PIPELINE query");
@@ -619,6 +620,7 @@ QueryPipeline InterpreterExplainQuery::executeImpl()
             break;
         }
     }
+    buf.finalize();
     if (insert_buf)
     {
         if (single_line)

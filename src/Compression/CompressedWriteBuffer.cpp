@@ -10,6 +10,9 @@
 #include <Compression/CompressionFactory.h>
 #include <Compression/CompressedWriteBuffer.h>
 
+#include "Common/StackTrace.h"
+#include <Common/logger_useful.h>
+
 
 namespace DB
 {
@@ -69,6 +72,7 @@ void CompressedWriteBuffer::finalizeImpl()
     /// Don't try to resize buffer in nextImpl.
     use_adaptive_buffer_size = false;
     next();
+    BufferWithOwnMemory<WriteBuffer>::finalizeImpl();
 }
 
 CompressedWriteBuffer::CompressedWriteBuffer(
@@ -81,11 +85,16 @@ CompressedWriteBuffer::CompressedWriteBuffer(
 {
 }
 
-CompressedWriteBuffer::~CompressedWriteBuffer()
+void CompressedWriteBuffer::cancelImpl() noexcept
 {
-    if (!canceled)
-        finalize();
+    LOG_DEBUG(getLogger("CompressedWriteBuffer"), "cancelImpl, stack {}", StackTrace().toString());
+    BufferWithOwnMemory<WriteBuffer>::cancelImpl();
+    out.cancel();
 }
 
+CompressedWriteBuffer::~CompressedWriteBuffer()
+{
+    LOG_DEBUG(getLogger("CompressedWriteBuffer"), "dtor");
+}
 
 }

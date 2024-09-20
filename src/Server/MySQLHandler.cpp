@@ -29,6 +29,7 @@
 #include <Common/logger_useful.h>
 #include <Common/re2.h>
 #include <Common/setThreadName.h>
+#include "IO/WriteBuffer.h"
 
 #if USE_SSL
 #    include <Poco/Crypto/RSAKey.h>
@@ -216,7 +217,7 @@ void MySQLHandler::run()
     socket().setSendTimeout(settings[Setting::send_timeout]);
 
     in = std::make_shared<ReadBufferFromPocoSocket>(socket(), read_event);
-    out = std::make_shared<WriteBufferFromPocoSocket>(socket(), write_event);
+    out = std::make_shared<AutoCanceledWriteBuffer<WriteBufferFromPocoSocket>>(socket(), write_event);
     packet_endpoint = std::make_shared<MySQLProtocol::PacketEndpoint>(*in, *out, sequence_id);
 
     try
@@ -671,7 +672,9 @@ void MySQLHandlerSSL::finishHandshakeSSL(
     ss->setSendTimeout(socket().getSendTimeout());
 
     in = std::make_shared<ReadBufferFromPocoSocket>(*ss);
-    out = std::make_shared<WriteBufferFromPocoSocket>(*ss);
+    if (out)
+        out->finalize();
+    out = std::make_shared<AutoCanceledWriteBuffer<WriteBufferFromPocoSocket>>(*ss);
     sequence_id = 2;
     packet_endpoint = std::make_shared<MySQLProtocol::PacketEndpoint>(*in, *out, sequence_id);
     packet_endpoint->receivePacket(packet); /// Reading HandshakeResponse from secure socket.

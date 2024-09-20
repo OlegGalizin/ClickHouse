@@ -2,6 +2,8 @@
 
 #include "config.h"
 
+#include <IO/WriteBufferFromString.h>
+
 #include <atomic>
 #include <memory>
 #include <unordered_map>
@@ -12,7 +14,6 @@
 namespace DB
 {
 
-class WriteBufferFromOwnString;
 class KeeperDispatcher;
 
 using String = std::string;
@@ -27,7 +28,6 @@ using FourLetterCommandPtr = std::shared_ptr<DB::IFourLetterCommand>;
 struct IFourLetterCommand
 {
 public:
-    using StringBuffer = DB::WriteBufferFromOwnString;
     explicit IFourLetterCommand(KeeperDispatcher & keeper_dispatcher_);
 
     virtual String name() = 0;

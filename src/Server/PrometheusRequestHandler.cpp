@@ -364,9 +364,9 @@ void PrometheusRequestHandler::handleRequest(HTTPServerRequest & request, HTTPSe
     {
         tryLogCurrentException(log);
 
+
         ExecutionStatus status = ExecutionStatus::fromCurrentException("", send_stacktrace);
-        trySendExceptionToClient(status.message, status.code, request, response);
-        tryFinalizeResponse(response);
+        trySendExceptionToHTTPClient_A(status.message, status.code, request, response, write_buffer_from_response.get());
 
         tryCallOnException();
     }
@@ -397,38 +397,17 @@ void PrometheusRequestHandler::finalizeResponse(HTTPServerResponse & response)
         response_finalized = true;
 
         if (write_buffer_from_response)
-            std::exchange(write_buffer_from_response, {})->finalize();
+        {
+            auto tmp = std::move(write_buffer_from_response);
+            tmp->finalize();
+        }
         else
-            WriteBufferFromHTTPServerResponse{response, http_method == HTTPRequest::HTTP_HEAD, write_event}.finalize();
+        {
+            auto wb = WriteBufferFromHTTPServerResponse(response, http_method == HTTPRequest::HTTP_HEAD, write_event);
+            wb.finalize();
+        }
     }
     chassert(response_finalized && !write_buffer_from_response);
-}
-
-void PrometheusRequestHandler::trySendExceptionToClient(const String & exception_message, int exception_code, HTTPServerRequest & request, HTTPServerResponse & response)
-{
-    if (response_finalized)
-        return; /// Response is already finalized (or tried to). We can't write the error message to the response in either case.
-
-    try
-    {
-        sendExceptionToHTTPClient(exception_message, exception_code, request, response, &getOutputStream(response), log);
-    }
-    catch (...)
-    {
-        tryLogCurrentException(log, "Couldn't send exception to client");
-    }
-}
-
-void PrometheusRequestHandler::tryFinalizeResponse(HTTPServerResponse & response)
-{
-    try
-    {
-        finalizeResponse(response);
-    }
-    catch (...)
-    {
-        tryLogCurrentException(log, "Cannot flush data to client (after sending exception)");
-    }
 }
 
 void PrometheusRequestHandler::tryCallOnException()

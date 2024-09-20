@@ -7,12 +7,19 @@
 #include <Poco/Net/HTTPResponse.h>
 #include <Poco/Net/StreamSocket.h>
 #include <Poco/NumberFormatter.h>
+#include "Common/Exception.h"
+#include "base/defines.h"
 
 #include <memory>
 
 
 namespace DB
 {
+
+namespace ErrorCodes
+{
+    extern const int LOGICAL_ERROR;
+}
 
 
 class HTTPWriteBufferChunked : public WriteBufferFromPocoSocket
@@ -34,8 +41,8 @@ protected:
 
     void finalizeImpl() override
     {
-        WriteBufferFromPocoSocket::finalizeImpl();
         socketSendBytes("0\r\n\r\n", 5);
+        WriteBufferFromPocoSocket::finalizeImpl();
     }
 };
 
@@ -86,8 +93,13 @@ public:
 
     void setChunked(size_t buf_size = DBMS_DEFAULT_BUFFER_SIZE)
     {
+        if (count() > 0 && count() != offset())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "can't do setChunked on HTTPWriteBuffer, buffer is already in use");
+
         chunked = true;
         resizeIfNeeded(buf_size);
+
+        LOG_DEBUG(getLogger("HTTPWriteBuffer"), "setChunked");
     }
 
     bool isChunked() const
@@ -97,10 +109,15 @@ public:
 
     void setFixedLength(size_t length)
     {
+        if (count() > 0 && count() != offset())
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "can't do setFixedLength on HTTPWriteBuffer, buffer is already in use");
+
         chunked = false;
         fixed_length = length;
         count_length = 0;
         resizeIfNeeded(length);
+
+        LOG_DEBUG(getLogger("HTTPWriteBuffer"), "setFixedLength");
     }
 
     size_t isFixedLength() const
@@ -108,8 +125,20 @@ public:
         return chunked ? 0 : fixed_length;
     }
 
+    size_t fixedLengthLeft() const
+    {
+        chassert(isFixedLength());
+
+        if (fixed_length <= count_length - offset())
+            return 0;
+        return fixed_length - count_length - offset();
+    }
+
     void setPlain(size_t buf_size = DBMS_DEFAULT_BUFFER_SIZE)
     {
+        if (count() > 0)
+            throw Exception(ErrorCodes::LOGICAL_ERROR, "can't do setPlain on HTTPWriteBuffer, buffer is already in use");
+
         chunked = false;
         fixed_length = 0;
         count_length = 0;
@@ -124,13 +153,24 @@ public:
 protected:
     void finalizeImpl() override
     {
+        LOG_DEBUG(getLogger("HTTPWriteBuffer"), "finalizeImpl");
+
         WriteBufferFromPocoSocket::finalizeImpl();
+
         if (chunked)
             socketSendBytes("0\r\n\r\n", 5);
     }
 
+    void breakFixedLength()
+    {
+        if (fixed_length > 1)
+            fixed_length -= 1;
+    }
+
     void nextImpl() override
     {
+        LOG_DEBUG(getLogger("HTTPWriteBuffer"), "nextImpl");
+
         if (chunked)
             nextImplChunked();
         else if (fixed_length)
@@ -141,6 +181,8 @@ protected:
 
     void nextImplFixedLength()
     {
+        /// Do we drop the data silently???
+
         if (count_length >= fixed_length || offset() == 0)
             return;
 
@@ -154,6 +196,8 @@ protected:
 
     void nextImplChunked()
     {
+        LOG_DEBUG(getLogger("HTTPWriteBuffer"), "nextImplChunked");
+
         if (offset() == 0)
             return;
 
@@ -161,6 +205,7 @@ protected:
         Poco::NumberFormatter::appendHex(chunk_header, offset());
         chunk_header.append("\r\n", 2);
         socketSendBytes(chunk_header.data(), static_cast<int>(chunk_header.size()));
+        LOG_DEBUG(getLogger("HTTPWriteBuffer"), "chunk {}", offset());
         WriteBufferFromPocoSocket::nextImpl();
         socketSendBytes("\r\n", 2);
     }

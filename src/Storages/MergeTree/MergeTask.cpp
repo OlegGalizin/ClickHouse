@@ -5,10 +5,12 @@
 #include <memory>
 #include <fmt/format.h>
 
+#include "Common/Exception.h"
 #include <Common/logger_useful.h>
 #include <Common/ActionBlocker.h>
 #include <Core/Settings.h>
 #include <Common/ProfileEvents.h>
+#include "base/defines.h"
 #include <Processors/Transforms/CheckSortedTransform.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Compression/CompressedWriteBuffer.h>
@@ -150,6 +152,16 @@ public:
         finalized = true;
         final_size = write_buffer->count();
         return final_size;
+    }
+
+    void cancelWriting()
+    {
+        if (tmp_disk)
+            tmp_disk->cancel();
+        if (write_buffer)
+            write_buffer->cancel();
+        if (uncompressed_write_buffer)
+            uncompressed_write_buffer->cancel();
     }
 
 private:
@@ -610,6 +622,15 @@ bool MergeTask::ExecuteAndFinalizeHorizontalPart::execute()
     /// Move to the next subtask in an array of subtasks
     ++subtasks_iterator;
     return subtasks_iterator != subtasks.end();
+}
+
+void MergeTask::ExecuteAndFinalizeHorizontalPart::cancel() noexcept
+{
+    if (ctx->rows_sources_temporary_file)
+        ctx->rows_sources_temporary_file->cancelWriting();
+
+    if (ctx->merge_projection_parts_task_ptr)
+        ctx->merge_projection_parts_task_ptr->cancel();
 }
 
 
@@ -1260,6 +1281,8 @@ MergeTask::StageRuntimeContextPtr MergeTask::MergeProjectionsStage::getContextFo
 
 bool MergeTask::VerticalMergeStage::execute()
 {
+    LOG_DEBUG(getLogger("MergeTask::VerticalMergeStage::execute"), "begin");
+
     chassert(subtasks_iterator != subtasks.end());
 
     Stopwatch watch;
@@ -1271,7 +1294,33 @@ bool MergeTask::VerticalMergeStage::execute()
 
     /// Move to the next subtask in an array of subtasks
     ++subtasks_iterator;
+
+    if (subtasks_iterator == subtasks.end())
+        LOG_DEBUG(getLogger("MergeTask::VerticalMergeStage::execute"), "done");
+
+    LOG_DEBUG(getLogger("MergeTask::VerticalMergeStage::execute"), "next");
+
     return subtasks_iterator != subtasks.end();
+}
+
+void MergeTask::VerticalMergeStage::cancel() noexcept
+{
+    if (ctx->rows_sources_temporary_file)
+        ctx->rows_sources_temporary_file->cancelWriting();
+
+    if (ctx->column_to)
+        ctx->column_to->cancel();
+
+    if (ctx->prepared_pipeline.has_value())
+        ctx->prepared_pipeline->pipeline.cancel();
+
+    for (auto & stream : ctx->delayed_streams)
+        stream->cancel();
+
+    if (ctx->executor)
+        ctx->executor->cancel();
+
+    LOG_DEBUG(getLogger("MergeTask::VerticalMergeStage::cancel"), "end");
 }
 
 bool MergeTask::MergeProjectionsStage::execute()
@@ -1288,6 +1337,12 @@ bool MergeTask::MergeProjectionsStage::execute()
     /// Move to the next subtask in an array of subtasks
     ++subtasks_iterator;
     return subtasks_iterator != subtasks.end();
+}
+
+void MergeTask::MergeProjectionsStage::cancel() noexcept
+{
+    for (auto & prj_task: ctx->tasks_for_projections)
+        prj_task->cancel();
 }
 
 
@@ -1330,6 +1385,8 @@ bool MergeTask::VerticalMergeStage::executeVerticalMergeForAllColumns() const
 
 bool MergeTask::execute()
 {
+    LOG_DEBUG(getLogger("MergeTask::execute"), "begin");
+
     chassert(stages_iterator != stages.end());
     const auto & current_stage = *stages_iterator;
 
@@ -1354,10 +1411,30 @@ bool MergeTask::execute()
     /// Move to the next stage in an array of stages
     ++stages_iterator;
     if (stages_iterator == stages.end())
+    {
+        LOG_DEBUG(getLogger("MergeTask::execute"), "done");
         return false;
+    }
 
     (*stages_iterator)->setRuntimeContext(std::move(next_stage_context), global_ctx);
+    LOG_DEBUG(getLogger("MergeTask::execute"), "next");
     return true;
+}
+
+void MergeTask::cancel() noexcept
+{
+    LOG_DEBUG(getLogger("MergeTask::cancel"), "begin");
+    LOG_DEBUG(getLogger("MergeTask::cancel"), "st  {}", stages_iterator == stages.end());
+    if (stages_iterator != stages.end())
+    {
+        LOG_DEBUG(getLogger("MergeTask::cancel"), "cancel stage");
+        (*stages_iterator)->cancel();
+    }
+
+    LOG_DEBUG(getLogger("MergeTask::cancel"), "cancel to");
+    if (global_ctx->to)
+        global_ctx->to->cancel();
+    LOG_DEBUG(getLogger("MergeTask::cancel"), "end");
 }
 
 

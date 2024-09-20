@@ -68,6 +68,7 @@
 
 #include <boost/algorithm/string/case_conv.hpp>
 #include <boost/algorithm/string/replace.hpp>
+#include <cstdio>
 #include <iostream>
 #include <filesystem>
 #include <limits>
@@ -78,6 +79,7 @@
 
 #include <Common/config_version.h>
 #include <base/find_symbols.h>
+#include "IO/WriteBuffer.h"
 #include "config.h"
 #include <IO/ReadHelpers.h>
 #include <Processors/Formats/Impl/ValuesBlockInputFormat.h>
@@ -656,7 +658,7 @@ void ClientBase::initLogsOutputStream()
             if (server_logs_file.empty())
             {
                 /// Use stderr by default
-                out_logs_buf = std::make_unique<WriteBufferFromFileDescriptor>(STDERR_FILENO);
+                out_logs_buf = std::make_unique<AutoCanceledWriteBuffer<WriteBufferFromFileDescriptor>>(STDERR_FILENO);
                 wb = out_logs_buf.get();
                 color_logs = stderr_is_a_tty;
             }
@@ -669,7 +671,7 @@ void ClientBase::initLogsOutputStream()
             else
             {
                 out_logs_buf
-                    = std::make_unique<WriteBufferFromFile>(server_logs_file, DBMS_DEFAULT_BUFFER_SIZE, O_WRONLY | O_APPEND | O_CREAT);
+                    = std::make_unique<AutoCanceledWriteBuffer<WriteBufferFromFile>>(server_logs_file, DBMS_DEFAULT_BUFFER_SIZE, O_WRONLY | O_APPEND | O_CREAT);
                 wb = out_logs_buf.get();
             }
         }
@@ -823,7 +825,7 @@ void ClientBase::initTTYBuffer(ProgressOption progress)
         {
             try
             {
-                tty_buf = std::make_unique<WriteBufferFromFile>(tty_file_name, buf_size);
+                tty_buf = std::make_unique<AutoCanceledWriteBuffer<WriteBufferFromFile>>(tty_file_name, buf_size);
 
                 /// It is possible that the terminal file has writeable permissions
                 /// but we cannot write anything there. Check it with invisible character.
@@ -834,8 +836,7 @@ void ClientBase::initTTYBuffer(ProgressOption progress)
             }
             catch (const Exception & e)
             {
-                if (tty_buf)
-                    tty_buf.reset();
+                tty_buf.reset();
 
                 if (e.code() != ErrorCodes::CANNOT_OPEN_FILE)
                     throw;
@@ -848,7 +849,7 @@ void ClientBase::initTTYBuffer(ProgressOption progress)
 
     if (stderr_is_a_tty || progress == ProgressOption::ERR)
     {
-        tty_buf = std::make_unique<WriteBufferFromFileDescriptor>(STDERR_FILENO, buf_size);
+        tty_buf = std::make_unique<AutoCanceledWriteBuffer<WriteBufferFromFileDescriptor>>(STDERR_FILENO, buf_size);
     }
     else
         need_render_progress = false;
@@ -1383,10 +1384,10 @@ void ClientBase::resetOutput()
     logs_out_stream.reset();
 
     if (out_file_buf)
-    {
         out_file_buf->finalize();
-        out_file_buf.reset();
-    }
+    out_file_buf.reset();
+
+    out_logs_buf.reset();
 
     if (pager_cmd)
     {
@@ -1403,12 +1404,6 @@ void ClientBase::resetOutput()
         setupSignalHandler();
     }
     pager_cmd = nullptr;
-
-    if (out_logs_buf)
-    {
-        out_logs_buf->finalize();
-        out_logs_buf.reset();
-    }
 
     std_out.next();
 }
@@ -2575,9 +2570,7 @@ void ClientBase::runInteractive()
         catch (const ErrnoException & e)
         {
             if (e.getErrno() != EEXIST)
-            {
                 error_stream << getCurrentExceptionMessage(false) << '\n';
-            }
         }
     }
 

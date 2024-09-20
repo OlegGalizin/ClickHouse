@@ -3,6 +3,7 @@
 #include <Processors/Formats/IRowOutputFormat.h>
 #include <Common/Exception.h>
 #include <Common/logger_useful.h>
+#include "IO/WriteBuffer.h"
 
 namespace DB
 {
@@ -16,6 +17,25 @@ MessageQueueSink::MessageQueueSink(
     const ContextPtr & context_)
     : SinkToStorage(header), format_name(format_name_), max_rows_per_message(max_rows_per_message_), producer(std::move(producer_)), storage_name(storage_name_), context(context_)
 {
+}
+
+MessageQueueSink::~MessageQueueSink()
+{
+    LOG_TEST(
+        getLogger("MessageQueueSink"),
+        "d-tor isCanceled {}", isCancelled());
+
+    if (isCancelled())
+    {
+        if (format)
+            format->cancel();
+
+        if (buffer)
+            buffer->cancel();
+
+        if (producer)
+            producer->cancel();
+    }
 }
 
 void MessageQueueSink::onStart()
@@ -38,12 +58,31 @@ void MessageQueueSink::onStart()
 
 void MessageQueueSink::onFinish()
 {
+    LOG_TEST(
+        getLogger("MessageQueueSink"),
+        "onFinish finalized {}", buffer->isFinalized());
+
+    format->finalize();
+    buffer->finalize();
     producer->finish();
+}
+
+void MessageQueueSink::onException(std::exception_ptr /* exception */)
+{
+    LOG_TEST(
+        getLogger("MessageQueueSink"),
+        "onFinish finalized {}", buffer->isFinalized());
+    onFinish();
 }
 
 void MessageQueueSink::consume(Chunk & chunk)
 {
     const auto & columns = chunk.getColumns();
+
+    LOG_TEST(
+        getLogger("MessageQueueSink"),
+        "consume columns {}", columns.size());
+
     if (columns.empty())
         return;
 
@@ -63,6 +102,7 @@ void MessageQueueSink::consume(Chunk & chunk)
                 row_format->writeRow(columns, row);
             }
             row_format->finalize();
+            buffer->finalize();
             producer->produce(buffer->str(), i, columns, row - 1);
             /// Reallocate buffer if it's capacity is large then DBMS_DEFAULT_BUFFER_SIZE,
             /// because most likely in this case we serialized abnormally large row
@@ -75,22 +115,16 @@ void MessageQueueSink::consume(Chunk & chunk)
     {
         format->write(getHeader().cloneWithColumns(chunk.detachColumns()));
         format->finalize();
+        buffer->finalize();
         producer->produce(buffer->str(), chunk.getNumRows(), columns, chunk.getNumRows() - 1);
         buffer->restart();
         format->resetFormatter();
     }
-}
 
-void MessageQueueSink::onCancel() noexcept
-{
-    try
-    {
-        onFinish();
-    }
-    catch (...)
-    {
-        tryLogCurrentException(getLogger("MessageQueueSink"), "Error occurs on cancellation.");
-    }
+    LOG_TEST(
+        getLogger("MessageQueueSink"),
+        "consume finalized {}", buffer->isFinalized());
+
 }
 
 }

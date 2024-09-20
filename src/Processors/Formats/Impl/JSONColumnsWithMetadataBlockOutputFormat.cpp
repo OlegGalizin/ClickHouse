@@ -19,6 +19,10 @@ JSONColumnsWithMetadataBlockOutputFormat::JSONColumnsWithMetadataBlockOutputForm
 
 void JSONColumnsWithMetadataBlockOutputFormat::writePrefix()
 {
+    LOG_TEST(
+        getLogger("JSONColumnsWithMetadataBlockOutputFormat"),
+        "writePrefix buffer finalized {}", ostr->isFinalized());
+
     JSONUtils::writeObjectStart(*ostr);
     JSONUtils::writeMetadata(names, types, format_settings, *ostr);
 }

@@ -1,6 +1,7 @@
 #include <Interpreters/SystemLog.h>
 
 #include <base/scope_guard.h>
+#include "Common/Logger.h"
 #include <Common/SystemLogBase.h>
 #include <Common/logger_useful.h>
 #include <Common/MemoryTrackerBlockerInThread.h>
@@ -643,6 +644,8 @@ ASTPtr SystemLog<LogElement>::getCreateTableQuery()
     create->set(create->columns_list, new_columns_list);
 
     ParserStorageWithComment storage_parser;
+
+    LOG_DEBUG(log, "getCreateTableQuery: storage_def <{}>", storage_def);
 
     ASTPtr storage_with_comment_ast = parseQuery(
         storage_parser, storage_def.data(), storage_def.data() + storage_def.size(),

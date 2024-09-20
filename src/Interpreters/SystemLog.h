@@ -149,7 +149,7 @@ private:
     String old_create_query;
     bool is_prepared = false;
 
-    void savingThreadFunction() override;
+        void savingThreadFunction() override;
 
     /// flushImpl can be executed only in saving_thread.
     void flushImpl(const std::vector<LogElement> & to_flush, uint64_t to_flush_end);

@@ -1,6 +1,7 @@
 #include <Storages/MergeTree/MergeTreeDataPartWriterOnDisk.h>
 #include <Storages/MergeTree/MergeTreeIndexFullText.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
+#include "Common/Logger.h"
 #include <Common/ElapsedTimeProfileEventIncrement.h>
 #include <Common/MemoryTrackerBlockerInThread.h>
 #include <Common/logger_useful.h>
@@ -26,18 +27,18 @@ void MergeTreeDataPartWriterOnDisk::Stream<only_plain_file>::preFinalize()
     /// Otherwise some data might stuck in the buffers above plain_file and marks_file
     /// Also the order is important
 
+    LOG_DEBUG(getLogger("Stream"), "finalize compressed_hashing  compressor plain_hashing");
     compressed_hashing.finalize();
     compressor.finalize();
     plain_hashing.finalize();
 
     if constexpr (!only_plain_file)
     {
-        if (compress_marks)
-        {
-            marks_compressed_hashing.finalize();
-            marks_compressor.finalize();
-        }
+        LOG_DEBUG(getLogger("Stream"), "finalize marks_compressed_hashing  marks_compressor");
+        marks_compressed_hashing.finalize();
+        marks_compressor.finalize();
 
+        LOG_DEBUG(getLogger("Stream"), "finalize marks_hashing");
         marks_hashing.finalize();
     }
 
@@ -54,9 +55,33 @@ void MergeTreeDataPartWriterOnDisk::Stream<only_plain_file>::finalize()
     if (!is_prefinalized)
         preFinalize();
 
+    LOG_DEBUG(getLogger("Stream"), "finalize plain_file");
     plain_file->finalize();
+
     if constexpr (!only_plain_file)
+    {
+        LOG_DEBUG(getLogger("Stream"), "finalize marks_file");
         marks_file->finalize();
+    }
+}
+
+template<bool only_plain_file>
+void MergeTreeDataPartWriterOnDisk::Stream<only_plain_file>::cancel() noexcept
+{
+
+    compressed_hashing.cancel();
+    compressor.cancel();
+    plain_hashing.cancel();
+
+    if constexpr (!only_plain_file)
+    {
+        marks_compressed_hashing.cancel();
+        marks_compressor.cancel();
+        marks_hashing.cancel();
+    }
+
+    plain_file->cancel();
+    marks_file->cancel();
 }
 
 template<bool only_plain_file>
@@ -182,6 +207,35 @@ MergeTreeDataPartWriterOnDisk::MergeTreeDataPartWriterOnDisk(
     initStatistics();
 }
 
+MergeTreeDataPartWriterOnDisk::~MergeTreeDataPartWriterOnDisk()
+{
+    LOG_DEBUG(getLogger("MergeTreeDataPartWriterOnDisk"), "dtor");
+
+}
+
+void MergeTreeDataPartWriterOnDisk::cancel() noexcept
+{
+    LOG_DEBUG(getLogger("MergeTreeDataPartWriterOnDisk"), "cancel");
+
+    if (index_file_stream)
+        index_file_stream->cancel();
+    if (index_file_hashing_stream)
+        index_file_hashing_stream->cancel();
+    if (index_compressor_stream)
+        index_compressor_stream->cancel();
+    if (index_source_hashing_stream)
+        index_source_hashing_stream->cancel();
+
+    for (auto & stream : stats_streams)
+        stream->cancel();
+
+    for (auto & stream : skip_indices_streams)
+        stream->cancel();
+
+    for (auto & store: gin_index_stores)
+        store.second->cancel();
+}
+
 // Implementation is split into static functions for ability
 /// of making unit tests without creation instance of IMergeTreeDataPartWriter,
 /// which requires a lot of dependencies and access to filesystem.
@@ -290,6 +344,8 @@ void MergeTreeDataPartWriterOnDisk::initSkipIndices()
     for (const auto & skip_index : skip_indices)
     {
         String stream_name = skip_index->getFileName();
+        LOG_DEBUG(log, "initSkipIndices {}", stream_name);
+
         skip_indices_streams.emplace_back(
                 std::make_unique<MergeTreeDataPartWriterOnDisk::Stream<false>>(
                         stream_name,
@@ -440,6 +496,7 @@ void MergeTreeDataPartWriterOnDisk::fillPrimaryIndexChecksums(MergeTreeData::Dat
 
         if (compress_primary_key)
         {
+            LOG_DEBUG(log, "do finalize index_source_hashing_stream index_compressor_stream");
             index_source_hashing_stream->finalize();
             index_compressor_stream->finalize();
         }
@@ -455,6 +512,7 @@ void MergeTreeDataPartWriterOnDisk::fillPrimaryIndexChecksums(MergeTreeData::Dat
         }
         checksums.files[index_name].file_size = index_file_hashing_stream->count();
         checksums.files[index_name].file_hash = index_file_hashing_stream->getHash();
+        LOG_DEBUG(log, "do preFinalize index_file_stream");
         index_file_stream->preFinalize();
     }
 }
@@ -463,6 +521,7 @@ void MergeTreeDataPartWriterOnDisk::finishPrimaryIndexSerialization(bool sync)
 {
     if (index_file_hashing_stream)
     {
+        LOG_DEBUG(log, "do finalize index_file_stream");
         index_file_stream->finalize();
         if (sync)
             index_file_stream->sync();
@@ -536,11 +595,17 @@ void MergeTreeDataPartWriterOnDisk::finishSkipIndicesSerialization(bool sync)
         if (sync)
             stream->sync();
     }
+
+    // std::unique_ptr<WriteBufferFromFileBase> index_file_stream;
+    // std::unique_ptr<HashingWriteBuffer> index_file_hashing_stream;
+    // std::unique_ptr<CompressedWriteBuffer> index_compressor_stream;
+    // std::unique_ptr<HashingWriteBuffer> index_source_hashing_stream;
+
     for (auto & store: gin_index_stores)
         store.second->finalize();
 
     for (size_t i = 0; i < skip_indices.size(); ++i)
-        LOG_DEBUG(log, "Spent {} ms calculating index {} for the part {}", execution_stats.skip_indices_build_us[i] / 1000, skip_indices[i]->index.name, data_part_name);
+        LOG_DEBUG(log, "Spent {} ms {}ns calculating index {} for the part {}", execution_stats.skip_indices_build_us[i] / 1000, execution_stats.skip_indices_build_us[i], skip_indices[i]->index.name, data_part_name);
 
     gin_index_stores.clear();
     skip_indices_streams.clear();

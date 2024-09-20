@@ -23,6 +23,7 @@
 #include <Common/logger_useful.h>
 #include <Common/ThreadPool.h>
 #include <Common/ProfileEvents.h>
+#include "base/defines.h"
 #include <libnuraft/log_val_type.hxx>
 #include <libnuraft/log_entry.hxx>
 #include <libnuraft/raft_server.hxx>
@@ -163,14 +164,20 @@ public:
             // we have a file we need to finalize first
             if (tryGetFileBaseBuffer() && prealloc_done)
             {
-                finalizeCurrentFile();
-
                 assert(current_file_description);
                 // if we wrote at least 1 log in the log file we can rename the file to reflect correctly the
                 // contained logs
                 // file can be deleted from disk earlier by compaction
-                if (!current_file_description->deleted)
+                if (current_file_description->deleted)
                 {
+                    LOG_WARNING(log, "Log {} is already deleted", current_file_description->path);
+                    prealloc_done = false;
+                    cancelCurrentFile();
+                }
+                else
+                {
+                    finalizeCurrentFile();
+
                     auto log_disk = current_file_description->disk;
                     const auto & path = current_file_description->path;
                     std::string new_path = path;
@@ -203,6 +210,10 @@ public:
                         moveChangelogBetweenDisks(log_disk, current_file_description, disk, new_path, keeper_context);
                     }
                 }
+            }
+            else
+            {
+                cancelCurrentFile();
             }
 
             auto latest_log_disk = getLatestLogDisk();
@@ -348,6 +359,8 @@ public:
     {
         if (isFileSet() && prealloc_done)
             finalizeCurrentFile();
+        else
+            cancelCurrentFile();
     }
 
 private:
@@ -357,16 +370,15 @@ private:
 
         chassert(current_file_description);
         // compact can delete the file and we don't need to do anything
-        if (current_file_description->deleted)
-        {
-            LOG_WARNING(log, "Log {} is already deleted", current_file_description->path);
-            return;
-        }
+        chassert(!current_file_description->deleted);
 
-        if (log_file_settings.compress_logs)
+        if (compressed_buffer)
             compressed_buffer->finalize();
 
         flush();
+
+        if (file_buf)
+            file_buf->finalize();
 
         const auto * file_buffer = tryGetFileBuffer();
 
@@ -382,16 +394,22 @@ private:
                 LOG_WARNING(log, "Could not ftruncate file. Error: {}, errno: {}", errnoToString(), errno);
         }
 
-        if (log_file_settings.compress_logs)
-        {
-            compressed_buffer.reset();
-        }
-        else
-        {
-            chassert(file_buf);
-            file_buf->finalize();
-            file_buf.reset();
-        }
+        compressed_buffer.reset();
+        file_buf.reset();
+    }
+
+    void cancelCurrentFile()
+    {
+        chassert(!prealloc_done);
+
+        if (compressed_buffer)
+            compressed_buffer->cancel();
+
+        if (file_buf)
+            file_buf->cancel();
+
+        compressed_buffer.reset();
+        file_buf.reset();
     }
 
     WriteBuffer & getBuffer()

@@ -1,12 +1,18 @@
 #pragma once
 
 #include <algorithm>
+#include <concepts>
+#include <exception>
 #include <memory>
 #include <cassert>
 #include <cstring>
 
+#include "Common/StackTrace.h"
+#include "Common/logger_useful.h"
 #include <Common/Exception.h>
 #include <Common/LockMemoryExceptionInThread.h>
+#include "Disks/IStoragePolicy.h"
+#include "base/types.h"
 #include <IO/BufferBase.h>
 
 
@@ -29,6 +35,13 @@ namespace ErrorCodes
 class WriteBuffer : public BufferBase
 {
 public:
+    /// Special exception to throw when the current MemoryWriteBuffer cannot receive data
+    class CurrentBufferExhausted : public std::exception
+    {
+    public:
+        const char * what() const noexcept override { return "WriteBuffer limit is exhausted"; }
+    };
+
     using BufferBase::set;
     using BufferBase::position;
     void set(Position ptr, size_t size) { BufferBase::set(ptr, size, 0); }
@@ -52,6 +65,12 @@ public:
         {
             nextImpl();
         }
+        catch (CurrentBufferExhausted &)
+        {
+            pos = working_buffer.begin();
+            bytes += bytes_in_buffer;
+            throw;
+        }
         catch (...)
         {
             /** If the nextImpl() call was unsuccessful, move the cursor to the beginning,
@@ -59,6 +78,8 @@ public:
               */
             pos = working_buffer.begin();
             bytes += bytes_in_buffer;
+
+            cancel();
 
             throw;
         }
@@ -141,6 +162,9 @@ public:
         }
     }
 
+    bool isFinalized() const { return finalized; }
+    bool isCanceled() const { return canceled; }
+
     void cancel() noexcept;
 
     /// Wait for data to be reliably written. Mainly, call fsync for fd.
@@ -164,6 +188,7 @@ protected:
 
     bool finalized = false;
     bool canceled = false;
+    int exception_level = std::uncaught_exceptions();
 
     /// The number of bytes to preserve from the initial position of `working_buffer`
     /// buffer. Apparently this is an additional out-parameter for nextImpl(),
@@ -178,6 +203,8 @@ private:
     {
         throw Exception(ErrorCodes::CANNOT_WRITE_AFTER_END_OF_BUFFER, "Cannot write after end of buffer.");
     }
+
+    //String create_stack = StackTrace().toString();
 };
 
 
@@ -198,6 +225,54 @@ private:
     void sync() override
     {
         /// no on
+    }
+};
+
+
+// AutoCancelWriteBuffer cancel the buffer in d-tor when it has not been finalized before d-tor
+// AutoCancelWriteBuffer could not be inherited.
+// Otherwise cancel method could not call proper cancelImpl because inheritor is destroyed already.
+// But the ussage of final inheritance is avoided in faivor to keep the possibility to use std::make_shared.
+template<class Base>
+class AutoCanceledWriteBuffer final : public Base
+{
+    static_assert(std::derived_from<Base, WriteBuffer>);
+
+public:
+    using Base::Base;
+
+    ~AutoCanceledWriteBuffer() override
+    {
+        LOG_DEBUG(getLogger("AutoCanceledWriteBuffer"), "d-tor");
+        if (!this->finalized && !this->canceled)
+            this->cancel();
+    }
+};
+
+
+/// That class is applied only by
+// AutoCancelWriteBuffer could not be inherited.
+// case 1 - HTTPServerResponse. The external interface HTTPResponce forces that.
+// case 3 - WriteBufferFromVector, WriteBufferFromString. It is safe to make them autofinaliziable.
+template<class Base>
+class AutoFinalizedWriteBuffer final: public Base
+{
+    static_assert(std::derived_from<Base, WriteBuffer>);
+
+public:
+    using Base::Base;
+
+    ~AutoFinalizedWriteBuffer() override
+    {
+        try
+        {
+            if (!this->finalized && !this->canceled)
+                this->finalize();
+        }
+        catch (...)
+        {
+            tryLogCurrentException(__PRETTY_FUNCTION__);
+        }
     }
 };
 

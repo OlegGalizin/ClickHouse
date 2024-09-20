@@ -81,15 +81,15 @@ WriteBufferFromFile::~WriteBufferFromFile()
     if (fd < 0)
         return;
 
-    try
-    {
-        if (!canceled)
-            finalize();
-    }
-    catch (...)
-    {
-        tryLogCurrentException(__PRETTY_FUNCTION__);
-    }
+    // try
+    // {
+    //     if (!finalized)
+    //         close();
+    // }
+    // catch (...)
+    // {
+    //     tryLogCurrentException(__PRETTY_FUNCTION__);
+    // }
 
     int err = ::close(fd);
     /// Everything except for EBADF should be ignored in dtor, since all of
@@ -107,6 +107,7 @@ void WriteBufferFromFile::finalizeImpl()
         return;
 
     next();
+    WriteBufferFromFileDescriptor::finalizeImpl();
 }
 
 

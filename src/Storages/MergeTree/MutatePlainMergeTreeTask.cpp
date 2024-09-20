@@ -1,8 +1,10 @@
+#include <cstddef>
 #include <Storages/MergeTree/MutatePlainMergeTreeTask.h>
 
 #include <Storages/StorageMergeTree.h>
 #include <Interpreters/TransactionLog.h>
 #include <Common/ProfileEventsScope.h>
+#include "base/defines.h"
 #include <Core/Settings.h>
 
 namespace DB
@@ -44,7 +46,6 @@ void MutatePlainMergeTreeTask::prepare()
     write_part_log = [this] (const ExecutionStatus & execution_status)
     {
         auto profile_counters_snapshot = std::make_shared<ProfileEvents::Counters::Snapshot>(profile_counters.getPartiallyAtomicSnapshot());
-        mutate_task.reset();
         storage.writePartLog(
             PartLogElement::MUTATE_PART,
             execution_status,
@@ -108,6 +109,7 @@ bool MutatePlainMergeTreeTask::executeStep()
 
                 storage.updateMutationEntriesErrors(future_part, true, "");
                 mutate_task->updateProfileEvents();
+
                 write_part_log({});
 
                 state = State::NEED_FINISH;
@@ -123,7 +125,7 @@ bool MutatePlainMergeTreeTask::executeStep()
                 mutate_task->updateProfileEvents();
                 write_part_log(ExecutionStatus::fromCurrentException("", true));
                 tryLogCurrentException(__PRETTY_FUNCTION__);
-                return false;
+                throw;
             }
         }
         case State::NEED_FINISH:
@@ -140,6 +142,13 @@ bool MutatePlainMergeTreeTask::executeStep()
 
     return false;
 }
+
+void MutatePlainMergeTreeTask::cancel() noexcept
+{
+    if (mutate_task)
+        mutate_task->cancel();
+}
+
 
 ContextMutablePtr MutatePlainMergeTreeTask::createTaskContext() const
 {
