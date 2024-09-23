@@ -310,7 +310,8 @@ void ZooKeeper::cancelWriteBuffer() noexcept
 {
     if (compressed_out)
          compressed_out->cancel();
-    out->cancel();
+    if (out)
+        out->cancel();
 }
 
 ReadBuffer & ZooKeeper::getReadBuffer()
@@ -549,10 +550,7 @@ void ZooKeeper::connect(
             catch (...)
             {
                 fail_reasons << "\n" << getCurrentExceptionMessage(false) << ", " << node.address->toString();
-                if (compressed_out)
-                    compressed_out->cancel();
-                if (out)
-                    out->cancel();
+                cancelWriteBuffer();
             }
         }
 

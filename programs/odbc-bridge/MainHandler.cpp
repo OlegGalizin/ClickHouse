@@ -194,21 +194,13 @@ void ODBCHandler::handleRequest(HTTPServerRequest & request, HTTPServerResponse 
             CompletedPipelineExecutor executor(pipeline);
             executor.execute();
         }
+
+        out.finalize();
     }
     catch (...)
     {
         tryLogCurrentException(log);
         out.cancelWithException(request, getCurrentExceptionCode(), getCurrentExceptionMessage(true), nullptr);
-        return;
-    }
-
-    try
-    {
-        out.finalize();
-    }
-    catch (...)
-    {
-        tryLogCurrentException(log, "Failed to finalize response write buffer");
     }
 }
 
