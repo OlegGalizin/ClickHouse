@@ -214,4 +214,11 @@ bool ZstdDeflatingAppendableWriteBuffer::isNeedToAddEmptyBlock()
     return false;
 }
 
+void ZstdDeflatingAppendableWriteBuffer::cancelImpl() noexcept
+{
+    out->cancel();
+
+    /// To free cctx
+    finalizeZstd();
+}
 }
