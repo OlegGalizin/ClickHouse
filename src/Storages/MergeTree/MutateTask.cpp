@@ -1963,6 +1963,11 @@ public:
         return false;
     }
 
+    void cancel() noexcept override
+    {
+        executable_task->cancel();
+    }
+
 private:
     enum class State
     {
