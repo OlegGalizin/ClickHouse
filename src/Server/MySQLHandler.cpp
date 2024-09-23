@@ -224,7 +224,7 @@ void MySQLHandler::run()
     {
         Handshake handshake(server_capabilities, connection_id, VERSION_STRING + String("-") + VERSION_NAME,
             auth_plugin->getName(), auth_plugin->getAuthPluginData(), CharacterSet::utf8_general_ci);
-        packet_endpoint->sendPacket<Handshake>(handshake, true);
+        packet_endpoint->sendPacket<Handshake>(handshake);
 
         LOG_TRACE(log, "Sent handshake");
 
@@ -258,11 +258,11 @@ void MySQLHandler::run()
         catch (const Exception & exc)
         {
             log->log(exc);
-            packet_endpoint->sendPacket(ERRPacket(exc.code(), "00000", exc.message()), true);
+            packet_endpoint->sendPacket(ERRPacket(exc.code(), "00000", exc.message()));
         }
 
         OKPacket ok_packet(0, handshake_response.capability_flags, 0, 0, 0);
-        packet_endpoint->sendPacket(ok_packet, true);
+        packet_endpoint->sendPacket(ok_packet);
 
         while (tcp_server.isOpen())
         {
@@ -322,7 +322,7 @@ void MySQLHandler::run()
             catch (...)
             {
                 tryLogCurrentException(log, "MySQLHandler: Cannot read packet: ");
-                packet_endpoint->sendPacket(ERRPacket(getCurrentExceptionCode(), "00000", getCurrentExceptionMessage(false)), true);
+                packet_endpoint->sendPacket(ERRPacket(getCurrentExceptionCode(), "00000", getCurrentExceptionMessage(false)));
             }
         }
     }
@@ -401,7 +401,7 @@ void MySQLHandler::authenticate(const String & user_name, const String & auth_pl
     catch (const Exception & exc)
     {
         LOG_ERROR(log, "Authentication for user {} failed.", user_name);
-        packet_endpoint->sendPacket(ERRPacket(exc.code(), "00000", exc.message()), true);
+        packet_endpoint->sendPacket(ERRPacket(exc.code(), "00000", exc.message()));
         throw;
     }
     LOG_DEBUG(log, "Authentication for user {} succeeded.", user_name);
@@ -413,7 +413,7 @@ void MySQLHandler::comInitDB(ReadBuffer & payload)
     readStringUntilEOF(database, payload);
     LOG_DEBUG(log, "Setting current database to {}", database);
     session->sessionContext()->setCurrentDatabase(database);
-    packet_endpoint->sendPacket(OKPacket(0, client_capabilities, 0, 0, 1), true);
+    packet_endpoint->sendPacket(OKPacket(0, client_capabilities, 0, 0, 1));
 }
 
 void MySQLHandler::comFieldList(ReadBuffer & payload)
@@ -431,12 +431,12 @@ void MySQLHandler::comFieldList(ReadBuffer & payload)
         );
         packet_endpoint->sendPacket(column_definition);
     }
-    packet_endpoint->sendPacket(OKPacket(0xfe, client_capabilities, 0, 0, 0), true);
+    packet_endpoint->sendPacket(OKPacket(0xfe, client_capabilities, 0, 0, 0));
 }
 
 void MySQLHandler::comPing()
 {
-    packet_endpoint->sendPacket(OKPacket(0x0, client_capabilities, 0, 0, 0), true);
+    packet_endpoint->sendPacket(OKPacket(0x0, client_capabilities, 0, 0, 0));
 }
 
 void MySQLHandler::comQuery(ReadBuffer & payload, bool binary_protocol)
@@ -447,7 +447,7 @@ void MySQLHandler::comQuery(ReadBuffer & payload, bool binary_protocol)
     // As Clickhouse doesn't support these statements, we just send OK packet in response.
     if (isFederatedServerSetupSetCommand(query))
     {
-        packet_endpoint->sendPacket(OKPacket(0x00, client_capabilities, 0, 0, 0), true);
+        packet_endpoint->sendPacket(OKPacket(0x00, client_capabilities, 0, 0, 0));
     }
     else
     {
@@ -532,7 +532,7 @@ void MySQLHandler::comQuery(ReadBuffer & payload, bool binary_protocol)
 
 
         if (!with_output)
-            packet_endpoint->sendPacket(OKPacket(0x00, client_capabilities, affected_rows, 0, 0), true);
+            packet_endpoint->sendPacket(OKPacket(0x00, client_capabilities, affected_rows, 0, 0));
     }
 }
 
@@ -543,9 +543,9 @@ void MySQLHandler::comStmtPrepare(DB::ReadBuffer & payload)
 
     auto statement_id_opt = emplacePreparedStatement(std::move(statement));
     if (statement_id_opt.has_value())
-        packet_endpoint->sendPacket(PreparedStatementResponseOK(statement_id_opt.value(), 0, 0, 0), true);
+        packet_endpoint->sendPacket(PreparedStatementResponseOK(statement_id_opt.value(), 0, 0, 0));
     else
-        packet_endpoint->sendPacket(ERRPacket(), true);
+        packet_endpoint->sendPacket(ERRPacket());
 }
 
 void MySQLHandler::comStmtExecute(ReadBuffer & payload)
@@ -557,7 +557,7 @@ void MySQLHandler::comStmtExecute(ReadBuffer & payload)
     if (statement_opt.has_value())
         MySQLHandler::comQuery(statement_opt.value(), true);
     else
-        packet_endpoint->sendPacket(ERRPacket(), true);
+        packet_endpoint->sendPacket(ERRPacket());
 };
 
 void MySQLHandler::comStmtClose(ReadBuffer & payload)
@@ -672,8 +672,6 @@ void MySQLHandlerSSL::finishHandshakeSSL(
     ss->setSendTimeout(socket().getSendTimeout());
 
     in = std::make_shared<ReadBufferFromPocoSocket>(*ss);
-    if (out)
-        out->finalize();
     out = std::make_shared<AutoCanceledWriteBuffer<WriteBufferFromPocoSocket>>(*ss);
     sequence_id = 2;
     packet_endpoint = std::make_shared<MySQLProtocol::PacketEndpoint>(*in, *out, sequence_id);

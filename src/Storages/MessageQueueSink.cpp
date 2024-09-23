@@ -60,18 +60,21 @@ void MessageQueueSink::onFinish()
 {
     LOG_TEST(
         getLogger("MessageQueueSink"),
-        "onFinish finalized {}", buffer->isFinalized());
+        "onFinish has buffer {} finalized {}", bool(buffer), buffer ? buffer->isFinalized() : true);
 
-    format->finalize();
-    buffer->finalize();
-    producer->finish();
+    if (format)
+        format->finalize();
+    if (buffer)
+        buffer->finalize();
+    if (producer)
+        producer->finish();
 }
 
 void MessageQueueSink::onException(std::exception_ptr /* exception */)
 {
     LOG_TEST(
         getLogger("MessageQueueSink"),
-        "onFinish finalized {}", buffer->isFinalized());
+        "onFinish has buffer {} finalized {}", bool(buffer), buffer ? buffer->isFinalized() : true);
     onFinish();
 }
 
